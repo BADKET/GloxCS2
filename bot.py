@@ -39,7 +39,7 @@ STEAM_API_URL = "https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/?appid
 DATA_FILE = "data.json"
 
 # Settings
-AUTO_SAFE_HOURS = 24 # Güncellemeden kaç saat sonra otomatik 'SAFE' densin?
+AUTO_SAFE_HOURS = 24 # Saat bazlı otomatik güvenli süresi
 
 def load_data():
     if not os.path.exists(DATA_FILE):
@@ -61,14 +61,17 @@ class CS2UpdateBot(commands.Bot):
 
     async def setup_hook(self):
         self.check_updates.start()
-        if GUILD_ID:
-            guild = discord.Object(id=int(GUILD_ID))
-            self.tree.copy_global_to(guild=guild)
-            synced = await self.tree.sync(guild=guild)
-            print(f"INSTANT SYNC: {len(synced)} commands activated.")
-        else:
-            synced = await self.tree.sync()
-            print(f"GLOBAL SYNC: {len(synced)} commands synced.")
+        try:
+            if GUILD_ID:
+                guild = discord.Object(id=int(GUILD_ID))
+                self.tree.copy_global_to(guild=guild)
+                synced = await self.tree.sync(guild=guild)
+                print(f"INSTANT SYNC: {len(synced)} commands activated.")
+            else:
+                synced = await self.tree.sync()
+                print(f"GLOBAL SYNC: {len(synced)} commands synced.")
+        except Exception as e:
+            print(f"Sync issue (can be ignored if monitor works): {e}")
 
     async def update_presence(self, status_mode):
         if status_mode == "RISKY":
@@ -122,12 +125,19 @@ class CS2UpdateBot(commands.Bot):
                         update_age_seconds = now_ts - news_timestamp
                         is_fresh_update = update_age_seconds < (AUTO_SAFE_HOURS * 3600)
 
-                        if news_id != self.data["last_news_id"] or self.first_run:
-                            is_new_discovery = news_id != self.data["last_news_id"]
-                            old_status = self.data.get("current_status", "SAFE")
+                        # Mantık: Haber değişti mi? VEYA Durum (Risky/Safe) değişti mi? (24 saat dolunca bu tetiklenir)
+                        is_new_id = news_id != self.data["last_news_id"]
+                        target_status = "RISKY" if (is_fresh_update or is_security_update) else "SAFE"
+                        status_changed = target_status != self.data.get("current_status", "SAFE")
+
+                        if is_new_id or status_changed or self.first_run:
+                            # Sadece durum gerçekten farklıysa veya haber yeniyse mesaj at
+                            should_send_msg = is_new_id or status_changed or self.first_run
                             
-                            if is_fresh_update or is_security_update:
-                                self.data["current_status"] = "RISKY"
+                            self.data["current_status"] = target_status
+                            self.data["last_news_id"] = news_id
+                            
+                            if target_status == "RISKY":
                                 if is_security_update:
                                     alert_color = 0xff0000 
                                     status_text = "「💀」 CRITICAL RISK (VAC)"
@@ -139,20 +149,10 @@ class CS2UpdateBot(commands.Bot):
                                     alert_msg = "⚠️ **WARNING:** New update detected. Security check is in progress."
                                     icon = "「🔴」"
                             else:
-                                self.data["current_status"] = "SAFE"
-                                alert_color = 0x2f3136 
+                                alert_color = 0x00ff7f 
                                 status_text = "「🟢」 UPDATED / SAFE"
-                                alert_msg = "ℹ️ Systems stable. No recent critical updates detected."
+                                alert_msg = "✅ Systems stable. No recent critical updates detected or safety period reached."
                                 icon = "「🟢」"
-
-                            # Mesaj gönderilme şartı:
-                            # 1. Tamamen yeni bir haber ID'si keşfedildiğinde.
-                            # 2. VEYA Haber aynı olsa bile durum değiştiğinde (Riskli -> Safe gibi).
-                            # 3. VEYA Bot ilk kez çalışıyorsa (startup).
-                            status_changed = old_status != self.data["current_status"]
-                            should_send_msg = is_new_discovery or status_changed or self.first_run
-                            
-                            self.data["last_news_id"] = news_id
 
                             channel = self.get_channel(CHANNEL_ID)
                             if channel:
@@ -169,26 +169,24 @@ class CS2UpdateBot(commands.Bot):
                                 embed.add_field(name="📡 Status", value=f"**`{status_text}`**", inline=True)
                                 embed.add_field(name="🕒 Time", value=f"<t:{news_timestamp}:R>", inline=True)
                                 embed.add_field(name="📝 Patch Notes Summary", value=f"```text\n{summary or 'No details provided.'}\n```", inline=False)
-                                embed.add_field(name="🔗 Links", value=f"[➔ Steam News Path]({news_url})", inline=False)
                                 embed.set_footer(text="Glox CS2 Update Tracker • High-End Monitoring")
                                 
                                 if should_send_msg:
-                                    # Artik tüm otomatik güncelleme haberleri everyone etiketi atar
                                     msg = await channel.send(content="@everyone", embed=embed)
-                                    if is_fresh_update or is_security_update:
+                                    if target_status == "RISKY":
                                         self.data["last_warning_message_id"] = msg.id
                                 
                                 await self.update_presence(self.data["current_status"])
                                 
                                 # Kanal ismini güncelle
                                 try:
-                                    channel_prefix = icon
-                                    await channel.edit(name=f"{channel_prefix}cs2-update-tracker")
-                                except Exception as e:
-                                    print(f"Channel rename failed (Rate limit?): {e}")
+                                    await channel.edit(name=f"{icon}cs2-update-tracker")
+                                except: pass
 
                                 self.first_run = False
                                 save_data(self.data)
+                    else:
+                        print(f"Steam API Error: {response.status}")
             except Exception as e:
                 print(f"Error occurred: {e}")
 
@@ -249,11 +247,8 @@ async def test_vac(interaction: discord.Interaction):
     embed.set_footer(text="Glox CS2 Update Tracker • Test Mode")
     await channel.send(content="@everyone", embed=embed)
     await bot.update_presence("RISKY")
-    # Kanal ismini güncelle
-    try:
-        await channel.edit(name="「💀」cs2-update-tracker")
-    except Exception as e:
-        print(f"Test rename failed: {e}")
+    try: await channel.edit(name="「💀」cs2-update-tracker")
+    except: pass
 
 @bot.tree.command(name="fix", description="Sets the cheat to safe mode and makes a detailed announcement.")
 async def fix(interaction: discord.Interaction):
@@ -262,6 +257,9 @@ async def fix(interaction: discord.Interaction):
         return
     data = load_data()
     data["current_status"] = "SAFE"
+    # Döngünün çift mesaj atmasını engellemek için first_run'ı kapat
+    bot.first_run = False
+    
     channel = bot.get_channel(CHANNEL_ID)
     if not channel: return
     if data["last_warning_message_id"]:
@@ -284,11 +282,8 @@ async def fix(interaction: discord.Interaction):
     await channel.send(content="@everyone", embed=embed)
     await interaction.response.send_message("Status updated to SAFE.", ephemeral=True)
     await bot.update_presence("SAFE")
-    # Kanal ismini yeşile çevir
-    try:
-        await channel.edit(name="「🟢」cs2-update-tracker")
-    except Exception as e:
-        print(f"Fix rename failed: {e}")
+    try: await channel.edit(name="「🟢」cs2-update-tracker")
+    except: pass
     save_data(data)
 
 if __name__ == "__main__":
