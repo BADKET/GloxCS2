@@ -124,7 +124,7 @@ class CS2UpdateBot(commands.Bot):
 
                         if news_id != self.data["last_news_id"] or self.first_run:
                             is_new_discovery = news_id != self.data["last_news_id"]
-                            self.data["last_news_id"] = news_id
+                            old_status = self.data.get("current_status", "SAFE")
                             
                             if is_fresh_update or is_security_update:
                                 self.data["current_status"] = "RISKY"
@@ -145,6 +145,15 @@ class CS2UpdateBot(commands.Bot):
                                 alert_msg = "ℹ️ Systems stable. No recent critical updates detected."
                                 icon = "「🟢」"
 
+                            # Mesaj gönderilme şartı:
+                            # 1. Tamamen yeni bir haber ID'si keşfedildiğinde.
+                            # 2. VEYA Haber aynı olsa bile (bot restart sonrası vb.) durum değiştiğinde (Riskli -> Safe gibi).
+                            # İlk çalışmada (first_run) eğer durum zaten aynıysa mesaj atma (çift mesajı önler).
+                            status_changed = old_status != self.data["current_status"]
+                            should_send_msg = is_new_discovery or (status_changed and not self.first_run)
+                            
+                            self.data["last_news_id"] = news_id
+
                             channel = self.get_channel(CHANNEL_ID)
                             if channel:
                                 embed = discord.Embed(
@@ -163,20 +172,18 @@ class CS2UpdateBot(commands.Bot):
                                 embed.add_field(name="🔗 Links", value=f"[➔ Steam News Path]({news_url})", inline=False)
                                 embed.set_footer(text="Glox CS2 Update Tracker • High-End Monitoring")
                                 
-                                content = "@everyone" if (is_new_discovery and (is_fresh_update or is_security_update)) else None
-                                msg = await channel.send(content=content, embed=embed)
-                                if is_fresh_update or is_security_update:
-                                    self.data["last_warning_message_id"] = msg.id
+                                if should_send_msg:
+                                    # Artik tüm otomatik güncelleme haberleri everyone etiketi atar
+                                    msg = await channel.send(content="@everyone", embed=embed)
+                                    if is_fresh_update or is_security_update:
+                                        self.data["last_warning_message_id"] = msg.id
                                 
                                 await self.update_presence(self.data["current_status"])
                                 
                                 # Kanal ismini güncelle
                                 try:
-                                    channel_prefix = "「💀」" if is_security_update else "「🔴」"
-                                    if not is_fresh_update and not is_security_update:
-                                        channel_prefix = "「🟢」"
+                                    channel_prefix = icon
                                     await channel.edit(name=f"{channel_prefix}cs2-update-tracker")
-                                    print(f"Channel renamed to {channel_prefix}")
                                 except Exception as e:
                                     print(f"Channel rename failed (Rate limit?): {e}")
 
@@ -244,7 +251,7 @@ async def test_vac(interaction: discord.Interaction):
     await bot.update_presence("RISKY")
     # Kanal ismini güncelle
     try:
-        await channel.edit(name="「💀」-cs2-duyuru")
+        await channel.edit(name="「💀」cs2-update-tracker")
     except Exception as e:
         print(f"Test rename failed: {e}")
 
@@ -279,7 +286,7 @@ async def fix(interaction: discord.Interaction):
     await bot.update_presence("SAFE")
     # Kanal ismini yeşile çevir
     try:
-        await channel.edit(name="「🟢」-cs2-duyuru")
+        await channel.edit(name="「🟢」cs2-update-tracker")
     except Exception as e:
         print(f"Fix rename failed: {e}")
     save_data(data)
