@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from flask import Flask
 from threading import Thread
 
-# Flask server for 7/24 alive status (Render/Glitch)
+# Flask server for 7/24 alive status
 app = Flask('')
 
 @app.route('/')
@@ -41,8 +41,11 @@ AUTO_SAFE_HOURS = 24
 def load_data():
     if not os.path.exists(DATA_FILE):
         return {"last_news_id": "0", "last_warning_message_id": None, "current_status": "SAFE", "fixed_id": None}
-    with open(DATA_FILE, "r") as f:
-        return json.load(f)
+    try:
+        with open(DATA_FILE, "r") as f:
+            return json.load(f)
+    except:
+        return {"last_news_id": "0", "last_warning_message_id": None, "current_status": "SAFE", "fixed_id": None}
 
 def save_data(data):
     with open(DATA_FILE, "w") as f:
@@ -88,8 +91,9 @@ class CS2UpdateBot(commands.Bot):
                         item = news_items[0]
                         news_id, news_title, news_url, news_content, news_ts = item.get("gid"), item.get("title"), item.get("url"), item.get("contents"), item.get("date")
 
-                        # Content Cleaning
-                        text = re.sub(r'<[^>]*?>', '', news_content)
+                        # Content Cleaning (Regex ile tüm tagleri sil)
+                        text = re.sub(r'<[^>]*?>', '', news_content) # HTML sil
+                        text = re.sub(r'\[.*?\]', '', text) # BBCode [p], [list] vb sil
                         text = text.replace("MISC", "").replace("  ", " ").strip()
                         summary = (text[:297] + "...") if len(text) > 300 else text
 
@@ -105,8 +109,7 @@ class CS2UpdateBot(commands.Bot):
                         status_changed = target_status != self.data.get("current_status")
                         
                         if is_new_id or status_changed or self.first_run:
-                            # Sadece durum gerçekten değiştiyse veya haber ID'si yeniyse mesaj at
-                            should_send = is_new_id or (status_changed and not self.first_run) or self.first_run
+                            should_send = is_new_id or status_changed or self.first_run
                             
                             self.data["current_status"] = target_status
                             self.data["last_news_id"] = news_id
@@ -116,7 +119,6 @@ class CS2UpdateBot(commands.Bot):
                                 if target_status == "SAFE":
                                     icon, color, msg = "「🟢」", 0x00ff7f, "✅ Systems stable. Security verification completed."
                                     if is_manually_fixed: msg = "✅ Verified by Admin. System is safe for use."
-                                    elif not self.first_run: msg = "✅ 24-hour safety period completed. No threats detected."
                                 else:
                                     icon, color, msg = "「🔴」", 0x6a0dad, "⚠️ **WARNING:** New update detected. Security check in progress."
                                     if is_sec: icon, color, msg = "「💀」", 0xff0000, "🚨 **URGENT:** VAC/Anti-Cheat changes detected!"
@@ -125,7 +127,7 @@ class CS2UpdateBot(commands.Bot):
                                 embed.add_field(name="📡 Status", value=f"**`{target_status}`**", inline=True)
                                 embed.add_field(name="🕒 Time", value=f"<t:{news_ts}:R>", inline=True)
                                 embed.add_field(name="📝 Summary", value=f"```text\n{summary}\n```", inline=False)
-                                embed.add_field(name="🔗 Link", value=f"[➔ Steam News Path]({news_url})", inline=False)
+                                embed.add_field(name="🔗 Link", value=f"➔ [Steam News Path]({news_url})", inline=False)
                                 embed.set_footer(text="Glox CS2 Update Tracker")
                                 
                                 sent_msg = await channel.send(content="@everyone", embed=embed)
@@ -143,51 +145,44 @@ bot = CS2UpdateBot()
 
 @bot.tree.command(name="status", description="Shows the current security status.")
 async def status(interaction: discord.Interaction):
-    data = load_data()
-    s = data.get("current_status", "SAFE")
+    s = bot.data.get("current_status", "SAFE")
     prefix = "「🟢」" if s == "SAFE" else "「🔴」"
     embed = discord.Embed(title=f"{prefix} GLOX-CS2 STATUS", color=0x00ff7f if s == "SAFE" else 0x6a0dad, timestamp=datetime.datetime.now())
     embed.add_field(name="🛡️ SECURITY STATUS", value=f"**`{s}`**", inline=False)
-    embed.add_field(name="🧬 Last Update ID", value=f"`{data.get('last_news_id')}`", inline=True)
+    embed.add_field(name="🧬 Last Update ID", value=f"`{bot.data.get('last_news_id')}`", inline=True)
     embed.add_field(name="🌐 Link", value="[Join Glox Discord](https://discord.gg/fQUYJ4JXck)", inline=False)
     await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name="test_vac", description="Simulates a VAC update.")
 async def test_vac(interaction: discord.Interaction):
     if interaction.user.id != ADMIN_ID: return
-    await interaction.response.send_message("Testing VAC Alert...", ephemeral=True)
-    channel = bot.get_channel(CHANNEL_ID)
-    embed = discord.Embed(title="「💀」 Release Notes (VAC Test)", description="🚨 **URGENT:** Test alert!", color=0xff0000, timestamp=datetime.datetime.now())
-    embed.add_field(name="📡 Status", value="**`RISKY`**", inline=True)
-    await channel.send(content="@everyone", embed=embed)
+    bot.data["fixed_id"] = None # Test için kilidi aç
+    bot.first_run = True
+    await interaction.response.send_message("Testing VAC scenario...", ephemeral=True)
+    await bot.check_updates()
 
 @bot.tree.command(name="fix", description="Sets the status to SAFE manually.")
 async def fix(interaction: discord.Interaction):
-    if interaction.user.id != ADMIN_ID:
-        await interaction.response.send_message("Permission denied.", ephemeral=True)
-        return
+    if interaction.user.id != ADMIN_ID: return
     
-    data = load_data()
-    data["fixed_id"] = data.get("last_news_id")
-    data["current_status"] = "SAFE"
-    save_data(data)
+    # Bellekteki veriyi güncelle
+    bot.data["fixed_id"] = bot.data.get("last_news_id")
+    bot.data["current_status"] = "SAFE"
+    save_data(bot.data)
     
-    # Eski warning mesajını sil (temizlik için)
+    # Eski mesajı kanaldan sil
     channel = bot.get_channel(CHANNEL_ID)
-    if channel and data.get("last_warning_message_id"):
+    if channel and bot.data.get("last_warning_message_id"):
         try:
-            m = await channel.fetch_message(data["last_warning_message_id"])
+            m = await channel.fetch_message(bot.data["last_warning_message_id"])
             await m.delete()
+            bot.data["last_warning_message_id"] = None
         except: pass
     
-    # Hemen teyit mesajı ver
-    await interaction.response.send_message("Applying Manual Fix... Detailed news will follow momentarily.", ephemeral=True)
+    await interaction.response.send_message("Updating announcement to SAFE status...", ephemeral=True)
     
-    # Botun döngüsünü tetiklemeden hemen burada da bir duyuru atabiliriz aynı tasarımda:
-    # Ancak döngü 2 dk içinde zaten bunu yapacaktır. 
-    # Ama instant istiyorsan döngü içindeki mesaj kodunu buraya da kopyalıyorum:
-    
-    bot.first_run = True # Bu döngüyü tetikleyecektir.
+    # Döngüyü anında tetikle (Zaten fixed_id olduğu için YEŞİL mesaj atacak)
+    bot.first_run = True 
     await bot.check_updates()
 
 if __name__ == "__main__":
