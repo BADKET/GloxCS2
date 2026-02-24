@@ -147,10 +147,10 @@ class CS2UpdateBot(commands.Bot):
 
                             # Mesaj gönderilme şartı:
                             # 1. Tamamen yeni bir haber ID'si keşfedildiğinde.
-                            # 2. VEYA Haber aynı olsa bile (bot restart sonrası vb.) durum değiştiğinde (Riskli -> Safe gibi).
-                            # İlk çalışmada (first_run) eğer durum zaten aynıysa mesaj atma (çift mesajı önler).
+                            # 2. VEYA Haber aynı olsa bile durum değiştiğinde (Riskli -> Safe gibi).
+                            # 3. VEYA Bot ilk kez çalışıyorsa (startup).
                             status_changed = old_status != self.data["current_status"]
-                            should_send_msg = is_new_discovery or (status_changed and not self.first_run)
+                            should_send_msg = is_new_discovery or status_changed or self.first_run
                             
                             self.data["last_news_id"] = news_id
 
