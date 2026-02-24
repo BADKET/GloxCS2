@@ -153,7 +153,7 @@ class CS2UpdateBot(commands.Bot):
                             channel = self.get_channel(CHANNEL_ID)
                             if channel:
                                 embed = discord.Embed(
-                                    title=f"✨ {news_title}",
+                                    title=f"{'「💀」' if is_security_update else '「🔴」'} {news_title}",
                                     url=news_url,
                                     description=f"{alert_msg}\n\n**━━━━━━━━━━━━━━━━━━━━━━**",
                                     color=alert_color,
@@ -186,6 +186,14 @@ class CS2UpdateBot(commands.Bot):
                                     self.data["last_warning_message_id"] = msg.id
                                 
                                 await self.update_presence(self.data["current_status"])
+                                
+                                # Kanal ismini güncelle
+                                try:
+                                    channel_prefix = "「💀」" if is_security_update else "「🔴」"
+                                    await channel.edit(name=f"{channel_prefix}-cs2-duyuru")
+                                except Exception as e:
+                                    print(f"Kanal ismi güncellenemedi (Limit olabilir): {e}")
+
                                 self.first_run = False
                                 save_data(self.data)
                     else:
@@ -203,15 +211,17 @@ async def status(interaction: discord.Interaction):
     
     if status_val == "RISKY":
         color = 0x6a0dad 
-        status_text = "🔴 RISKY / DO NOT USE"
+        status_text = "「🔴」 RISKY / DO NOT USE"
         desc = "⚠️ Game version changed. Security scan in progress, please wait."
+        prefix = "「🔴」"
     else:
         color = 0x00ff7f 
-        status_text = "🟢 UPDATED / SAFE"
+        status_text = "「🟢」 UPDATED / SAFE"
         desc = "✅ Systems active. Cheat is fully compatible with the current version."
+        prefix = "「🟢」"
 
     embed = discord.Embed(
-        title="🛰️ GLOX-CS2 STATUS",
+        title=f"{prefix} GLOX-CS2 STATUS",
         description=f"{desc}\n\n**━━━━━━━━━━━━━━━━━━━━━━**",
         color=color,
         timestamp=datetime.datetime.now()
@@ -225,6 +235,43 @@ async def status(interaction: discord.Interaction):
     embed.set_footer(text=f"Requested by: {interaction.user.name}", icon_url=interaction.user.avatar.url if interaction.user.avatar else None)
     
     await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="test_vac", description="Simulates a VAC update scenario.")
+async def test_vac(interaction: discord.Interaction):
+    if interaction.user.id != ADMIN_ID:
+        await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+        return
+
+    await interaction.response.send_message("Starting VAC Test scenario...", ephemeral=True)
+    channel = bot.get_channel(CHANNEL_ID)
+    if not channel: return
+
+    news_title = "Release Notes for 2/24/2026 (VAC Live Update)"
+    news_url = "https://store.steampowered.com/news/app/730"
+    news_timestamp = int(datetime.datetime.now().timestamp())
+    clean_content = "+ Added new VAC Live detection modules.\n- Fixed exploit related to sub-tick movement.\n* Security signatures have been updated."
+    
+    embed = discord.Embed(
+        title=f"「💀」 {news_title}",
+        url=news_url,
+        description="🚨 **URGENT:** VAC/Anti-Cheat changes detected! DO NOT use the cheat until verified.\n\n**━━━━━━━━━━━━━━━━━━━━━━**",
+        color=0xff0000,
+        timestamp=datetime.datetime.fromtimestamp(news_timestamp)
+    )
+    
+    embed.add_field(name="🛡️ SECURITY ANALYSIS", value="> This update may target anti-cheat systems. **Strictly not recommended to login.**", inline=False)
+    embed.add_field(name="📡 Status", value="**`「💀」 CRITICAL RISK (VAC)`**", inline=True)
+    embed.add_field(name="🕒 Time", value=f"<t:{news_timestamp}:R>", inline=True)
+    embed.add_field(name="📝 Patch Notes Summary", value=f"```text\n{clean_content}\n```", inline=False)
+    embed.set_footer(text="Glox CS2 Update Tracker • Test Mode")
+    
+    await channel.send(content="@everyone", embed=embed)
+    # Test amaçlı profil durumunu da RİSKLİ yap
+    await bot.update_presence("RISKY")
+    # Kanal ismini güncelle
+    try:
+        await channel.edit(name="「💀」-cs2-duyuru")
+    except: pass
 
 @bot.tree.command(name="fix", description="Sets the cheat to safe mode and makes a detailed announcement.")
 async def fix(interaction: discord.Interaction):
@@ -245,14 +292,14 @@ async def fix(interaction: discord.Interaction):
         data["last_warning_message_id"] = None
 
     embed = discord.Embed(
-        title="🛡️ GLOX-CS2 SECURITY VERIFIED",
+        title="「�」 GLOX-CS2 SECURITY VERIFIED",
         description="Latest version analysis completed and components verified.",
         color=0x00ff7f,
         timestamp=datetime.datetime.now()
     )
     
     embed.add_field(name="📊 Analysis Status", value="> `VAC / Anti-Cheat Scanned` ✅\n> `Signature Check Done` ✅\n> `Server Tests Passed` ✅", inline=False)
-    embed.add_field(name="🛰️ Current Status", value="**`🟢 UPDATED / SAFE`**", inline=True)
+    embed.add_field(name="🛰️ Current Status", value="**`「🟢」 UPDATED / SAFE`**", inline=True)
     embed.add_field(name="🕒 Verification Time", value=f"<t:{int(datetime.datetime.now().timestamp())}:R>", inline=True)
     embed.add_field(name="🎮 Entry Status", value="**✅ You can safely enter the game.**\nAll features are active and stable.", inline=False)
     embed.set_footer(text="Glox Digital Security • All Systems Active")
@@ -260,6 +307,10 @@ async def fix(interaction: discord.Interaction):
     await channel.send(content="@everyone", embed=embed)
     await interaction.response.send_message("Status updated to SAFE and announcement sent.", ephemeral=True)
     await bot.update_presence("SAFE")
+    # Kanal ismini tekrar yeşile çek
+    try:
+        await channel.edit(name="「🟢」-cs2-duyuru")
+    except: pass
     save_data(data)
 
 if __name__ == "__main__":
