@@ -100,12 +100,12 @@ class CS2UpdateBot(commands.Bot):
                         # Decision Logic
                         is_new_id = news_id != self.data["last_news_id"]
                         is_manually_fixed = self.data.get("fixed_id") == news_id
-                        target_status = "SAFE" if is_manually_fixed else ("RISKY" if (is_fresh or is_sec) else "SAFE")
                         
+                        target_status = "SAFE" if is_manually_fixed else ("RISKY" if (is_fresh or is_sec) else "SAFE")
                         status_changed = target_status != self.data.get("current_status")
                         
                         if is_new_id or status_changed or self.first_run:
-                            # MESAJ KRITERI: Yeni haber mi? VEYA Durum degisti mi? (Fixed id korumasi burada devreye girer)
+                            # Sadece durum gerçekten değiştiyse veya haber ID'si yeniyse mesaj at
                             should_send = is_new_id or (status_changed and not self.first_run) or self.first_run
                             
                             self.data["current_status"] = target_status
@@ -114,15 +114,18 @@ class CS2UpdateBot(commands.Bot):
                             channel = self.get_channel(CHANNEL_ID)
                             if channel and should_send:
                                 if target_status == "SAFE":
-                                    icon, color, msg = "「�」", 0x00ff7f, "✅ Systems stable. Security verification completed."
+                                    icon, color, msg = "「🟢」", 0x00ff7f, "✅ Systems stable. Security verification completed."
+                                    if is_manually_fixed: msg = "✅ Verified by Admin. System is safe for use."
+                                    elif not self.first_run: msg = "✅ 24-hour safety period completed. No threats detected."
                                 else:
                                     icon, color, msg = "「🔴」", 0x6a0dad, "⚠️ **WARNING:** New update detected. Security check in progress."
                                     if is_sec: icon, color, msg = "「💀」", 0xff0000, "🚨 **URGENT:** VAC/Anti-Cheat changes detected!"
 
                                 embed = discord.Embed(title=f"{icon} {news_title}", url=news_url, description=f"{msg}\n\n**━━━━━━━━━━━━━━━━━━━━━━**", color=color, timestamp=datetime.datetime.fromtimestamp(news_ts))
-                                embed.add_field(name=" Status", value=f"**`{target_status}`**", inline=True)
+                                embed.add_field(name="📡 Status", value=f"**`{target_status}`**", inline=True)
                                 embed.add_field(name="🕒 Time", value=f"<t:{news_ts}:R>", inline=True)
                                 embed.add_field(name="📝 Summary", value=f"```text\n{summary}\n```", inline=False)
+                                embed.add_field(name="🔗 Link", value=f"[➔ Steam News Path]({news_url})", inline=False)
                                 embed.set_footer(text="Glox CS2 Update Tracker")
                                 
                                 sent_msg = await channel.send(content="@everyone", embed=embed)
@@ -142,16 +145,17 @@ bot = CS2UpdateBot()
 async def status(interaction: discord.Interaction):
     data = load_data()
     s = data.get("current_status", "SAFE")
-    prefix = "「�」" if s == "SAFE" else "「�」"
+    prefix = "「🟢」" if s == "SAFE" else "「🔴」"
     embed = discord.Embed(title=f"{prefix} GLOX-CS2 STATUS", color=0x00ff7f if s == "SAFE" else 0x6a0dad, timestamp=datetime.datetime.now())
     embed.add_field(name="🛡️ SECURITY STATUS", value=f"**`{s}`**", inline=False)
+    embed.add_field(name="🧬 Last Update ID", value=f"`{data.get('last_news_id')}`", inline=True)
     embed.add_field(name="🌐 Link", value="[Join Glox Discord](https://discord.gg/fQUYJ4JXck)", inline=False)
     await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name="test_vac", description="Simulates a VAC update.")
 async def test_vac(interaction: discord.Interaction):
     if interaction.user.id != ADMIN_ID: return
-    await interaction.response.send_message("Testing VAC...", ephemeral=True)
+    await interaction.response.send_message("Testing VAC Alert...", ephemeral=True)
     channel = bot.get_channel(CHANNEL_ID)
     embed = discord.Embed(title="「💀」 Release Notes (VAC Test)", description="🚨 **URGENT:** Test alert!", color=0xff0000, timestamp=datetime.datetime.now())
     embed.add_field(name="📡 Status", value="**`RISKY`**", inline=True)
@@ -159,39 +163,32 @@ async def test_vac(interaction: discord.Interaction):
 
 @bot.tree.command(name="fix", description="Sets the status to SAFE manually.")
 async def fix(interaction: discord.Interaction):
-    if interaction.user.id != ADMIN_ID: return
+    if interaction.user.id != ADMIN_ID:
+        await interaction.response.send_message("Permission denied.", ephemeral=True)
+        return
+    
     data = load_data()
-    # Hafiza kilidini kur (Bu haber artik güvenli)
     data["fixed_id"] = data.get("last_news_id")
     data["current_status"] = "SAFE"
     save_data(data)
     
+    # Eski warning mesajını sil (temizlik için)
     channel = bot.get_channel(CHANNEL_ID)
-    if not channel: return
-    
-    # Eski mesajı sil
-    if data.get("last_warning_message_id"):
+    if channel and data.get("last_warning_message_id"):
         try:
             m = await channel.fetch_message(data["last_warning_message_id"])
             await m.delete()
         except: pass
-
-    # ŞİMDİ: Manuel Fix mesajını da ESKİ STİL (Steam Haber) şeklinde atıyoruz
-    news_id = data.get("last_news_id")
-    # API'den tekrar çekmek yerine mevcut bilgiyi kullanabiliriz, ama en temizi statusu güncellemek
-    # Botun döngüsü bir sonraki turda 'fixed_id' sayesinde sessiz kalacaktır
     
-    embed = discord.Embed(title="「🟢」 GLOX-CS2 SECURITY VERIFIED", description="✅ Systems verified by Admin. No issues found.", color=0x00ff7f, timestamp=datetime.datetime.now())
-    embed.add_field(name="� Status", value="**`SAFE`**", inline=True)
-    embed.add_field(name="⚡ Speed", value="**`10.2 Seconds`**", inline=True)
-    embed.add_field(name="🎮 Entry", value="**✅ Safe to enter.**", inline=False)
-    embed.set_footer(text="Glox CS2 Update Tracker")
+    # Hemen teyit mesajı ver
+    await interaction.response.send_message("Applying Manual Fix... Detailed news will follow momentarily.", ephemeral=True)
     
-    await channel.send(content="@everyone", embed=embed)
-    await interaction.response.send_message("Status updated to SAFE.", ephemeral=True)
-    await bot.update_presence("SAFE")
-    try: await channel.edit(name="「🟢」cs2-update-tracker")
-    except: pass
+    # Botun döngüsünü tetiklemeden hemen burada da bir duyuru atabiliriz aynı tasarımda:
+    # Ancak döngü 2 dk içinde zaten bunu yapacaktır. 
+    # Ama instant istiyorsan döngü içindeki mesaj kodunu buraya da kopyalıyorum:
+    
+    bot.first_run = True # Bu döngüyü tetikleyecektir.
+    await bot.check_updates()
 
 if __name__ == "__main__":
     if TOKEN: keep_alive(); bot.run(TOKEN)
