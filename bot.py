@@ -15,11 +15,17 @@ app = Flask('')
 
 @app.route('/')
 def home():
-    return "Glox CS2 Bot is Alive!"
+    # Render'ın "burada mısın?" sorusuna cevap
+    print("Health check received!")
+    return "Glox CS2 Bot is Alive!", 200
 
 def run():
     port = int(os.getenv('PORT', 8080))
-    app.run(host='0.0.0.0', port=port)
+    print(f"Web server starting on port {port}...")
+    try:
+        app.run(host='0.0.0.0', port=port)
+    except Exception as e:
+        print(f"Web server failed: {e}")
 
 def keep_alive():
     t = Thread(target=run)

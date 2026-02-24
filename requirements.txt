@@ -1,4 +1,5 @@
 discord.py
+discord.py
 aiocron
 aiohttp
 python-dotenv
